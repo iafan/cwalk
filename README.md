@@ -39,5 +39,18 @@ func walkFunc(path string, info os.FileInfo, err error) error {
 
 ...
 
-cwalk.Walk("/path/to/dir", walkFunc)
+err := cwalk.Walk("/path/to/dir", walkFunc)
 ```
+
+### Errors
+An error such as a file limit being exceeded will be reported as `too many open files` for a particular file.  Each occurance of this is available in the returned error via the `type WalkerError struct`.  When errors are encountered the file walk will be completed prematurley, not all paths/files shall be walked.  You can check and access for errors like this:
+
+```
+if err != nil {
+	fmt.Printf("Error : %s\n", err.Error())
+	for _, errors := range err.(cwalk.WalkerError).ErrorList {
+		fmt.Println(errors)
+	}
+}
+```
+

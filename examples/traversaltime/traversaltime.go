@@ -47,12 +47,19 @@ func main() {
 	fmt.Print("Running concurrent version... ")
 	start := time.Now()
 
-	cwalk.Walk(dir, callback)
+	err := cwalk.Walk(dir, callback)
 
 	fmt.Printf("done in %s\n", time.Since(start))
 	fmt.Printf("\t%d directories found\n", folderCount)
 	fmt.Printf("\t%d files found\n", fileCount)
 	fmt.Printf("\t%d errors found\n", errorCount)
+
+	if err != nil {
+		fmt.Printf("Error : %s\n", err.Error())
+		for _, errors := range err.(cwalk.WalkerError).ErrorList {
+			fmt.Println(errors)
+		}
+	}
 
 	// run the standard (single-threaded) version
 
@@ -69,4 +76,12 @@ func main() {
 	fmt.Printf("\t%d directories found\n", folderCount)
 	fmt.Printf("\t%d files found\n", fileCount)
 	fmt.Printf("\t%d errors found\n", errorCount)
+
+	if err != nil {
+		fmt.Printf("Error : %s\n", err.Error())
+		for _, errors := range err.(cwalk.WalkerError).ErrorList {
+			fmt.Println(errors)
+		}
+	}
+
 }
