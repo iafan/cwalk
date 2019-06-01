@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 )
 
@@ -19,15 +20,30 @@ var BufferSize = NumWorkers
 // to a walker function, does not point to a directory
 var ErrNotDir = errors.New("Not a directory")
 
-// A struct to store the errors reported from each worker routine
+// A struct to store individual errors reported from each worker routine
 type WalkerError struct {
-	ErrorList []error
+	error error
+	path  string
 }
 
-// Implement the error interface
+// A struct to store a list of errors reported from all worker routine
+type WalkerErrorList struct {
+	ErrorList []WalkerError
+}
+
+// Implement the error interface for WalkerError
 func (we WalkerError) Error() string {
-	if len(we.ErrorList) > 0 {
-		return "There were errors walking files"
+	return we.error.Error()
+}
+
+// Implement the error interface fo WalkerErrorList
+func (wel WalkerErrorList) Error() string {
+	if len(wel.ErrorList) > 0 {
+		out := make([]string, len(wel.ErrorList))
+		for i, err := range wel.ErrorList {
+			out[i] = err.Error()
+		}
+		return strings.Join(out, "\n")
 	}
 	return ""
 }
@@ -35,11 +51,11 @@ func (we WalkerError) Error() string {
 // Walker is constructed for each Walk() function invocation
 type Walker struct {
 	wg        sync.WaitGroup
-	ewg       sync.WaitGroup //a separate wg for error collection
+	ewg       sync.WaitGroup // a separate wg for error collection
 	jobs      chan string
 	walkFunc  filepath.WalkFunc
-	errors    chan error
-	errorList WalkerError //this is where we store the errors as we go
+	errors    chan WalkerError
+	errorList WalkerErrorList // this is where we store the errors as we go
 }
 
 // the readDirNames function below was taken from the original
@@ -108,7 +124,10 @@ func (w *Walker) addJob(path string) {
 		// process job synchronously
 		err := w.processPath(path)
 		if err != nil {
-			w.errors <- err
+			w.errors <- WalkerError{
+				error: err,
+				path:  path,
+			}
 		}
 	}
 }
@@ -119,7 +138,10 @@ func (w *Walker) worker() {
 	for path := range w.jobs {
 		err := w.processPath(path)
 		if err != nil {
-			w.errors <- err
+			w.errors <- WalkerError{
+				error: err,
+				path:  path,
+			}
 		}
 	}
 
@@ -130,11 +152,11 @@ func (w *Walker) worker() {
 // in the tree, including root directory.
 // Walk does not follow symbolic links.
 func (w *Walker) Walk(root string, walkFn filepath.WalkFunc) error {
-	w.errors = make(chan error, BufferSize)
+	w.errors = make(chan WalkerError, BufferSize)
 	w.jobs = make(chan string, BufferSize)
 	w.walkFunc = walkFn
 
-	w.ewg.Add(1) //a separate error waitgroup so w wait until all errors are reported before exiting
+	w.ewg.Add(1) // a separate error waitgroup so we wait until all errors are reported before exiting
 	go w.collectErrors()
 
 	info, err := os.Lstat(root)
