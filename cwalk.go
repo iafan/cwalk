@@ -21,13 +21,13 @@ var BufferSize = NumWorkers
 // to a walker function, does not point to a directory
 var ErrNotDir = errors.New("Not a directory")
 
-// A struct to store individual errors reported from each worker routine
+// WalkerError struct stores individual errors reported from each worker routine
 type WalkerError struct {
 	error error
 	path  string
 }
 
-// A struct to store a list of errors reported from all worker routine
+// WalkerErrorList struct store a list of errors reported from all worker routines
 type WalkerErrorList struct {
 	ErrorList []WalkerError
 }
