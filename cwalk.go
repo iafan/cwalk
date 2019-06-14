@@ -2,6 +2,7 @@ package cwalk
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -50,12 +51,14 @@ func (wel WalkerErrorList) Error() string {
 
 // Walker is constructed for each Walk() function invocation
 type Walker struct {
-	wg        sync.WaitGroup
-	ewg       sync.WaitGroup // a separate wg for error collection
-	jobs      chan string
-	walkFunc  filepath.WalkFunc
-	errors    chan WalkerError
-	errorList WalkerErrorList // this is where we store the errors as we go
+	wg             sync.WaitGroup
+	ewg            sync.WaitGroup // a separate wg for error collection
+	jobs           chan string
+	root           string
+	followSymlinks bool
+	walkFunc       filepath.WalkFunc
+	errors         chan WalkerError
+	errorList      WalkerErrorList // this is where we store the errors as we go
 }
 
 // the readDirNames function below was taken from the original
@@ -78,6 +81,28 @@ func readDirNames(dirname string) ([]string, error) {
 	return names, nil
 }
 
+// lstat is a wrapper for os.Lstat which accepts a path
+// relative to Walker.root and also follows symlinks
+func (w *Walker) lstat(relpath string) (info os.FileInfo, err error) {
+	path := filepath.Join(w.root, relpath)
+	info, err = os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	// check if this is a symlink
+	if w.followSymlinks && info.Mode()&os.ModeSymlink > 0 {
+		path, err = filepath.EvalSymlinks(path)
+		if err != nil {
+			return nil, err
+		}
+		info, err = os.Lstat(path)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return
+}
+
 // collectErrors processes any any errors passed via the error channel
 // and stores them in the errorList
 func (w *Walker) collectErrors() {
@@ -89,25 +114,43 @@ func (w *Walker) collectErrors() {
 
 // processPath processes one directory and adds
 // its subdirectories to the queue for further processing
-func (w *Walker) processPath(path string) error {
+func (w *Walker) processPath(relpath string) error {
 	defer w.wg.Done()
 
+	path := filepath.Join(w.root, relpath)
 	names, err := readDirNames(path)
 	if err != nil {
 		return err
 	}
 
-	root := path
 	for _, name := range names {
-		path = filepath.Join(root, name)
-		info, err := os.Lstat(path)
-		err = w.walkFunc(path, info, err)
+		subpath := filepath.Join(relpath, name)
+		info, err := w.lstat(subpath)
 
-		if err == nil && info.IsDir() {
-			w.addJob(path)
+		err = w.walkFunc(subpath, info, err)
+
+		if err == filepath.SkipDir {
+			return nil
 		}
-		if err != nil && err != filepath.SkipDir {
-			return err
+
+		if err != nil {
+			w.errors <- WalkerError{
+				error: err,
+				path:  subpath,
+			}
+			continue
+		}
+
+		if info == nil {
+			w.errors <- WalkerError{
+				error: fmt.Errorf("Broken symlink: %s", subpath),
+				path:  subpath,
+			}
+			continue
+		}
+
+		if info.IsDir() {
+			w.addJob(subpath)
 		}
 	}
 	return nil
@@ -149,9 +192,8 @@ func (w *Walker) worker() {
 
 // Walk recursively descends into subdirectories,
 // calling walkFn for each file or directory
-// in the tree, including root directory.
-// Walk does not follow symbolic links.
-func (w *Walker) Walk(root string, walkFn filepath.WalkFunc) error {
+// in the tree, including the root directory.
+func (w *Walker) Walk(relpath string, walkFn filepath.WalkFunc) error {
 	w.errors = make(chan WalkerError, BufferSize)
 	w.jobs = make(chan string, BufferSize)
 	w.walkFunc = walkFn
@@ -159,13 +201,19 @@ func (w *Walker) Walk(root string, walkFn filepath.WalkFunc) error {
 	w.ewg.Add(1) // a separate error waitgroup so we wait until all errors are reported before exiting
 	go w.collectErrors()
 
-	info, err := os.Lstat(root)
-	if err == nil {
-		err = w.walkFunc(root, info, err)
+	info, err := w.lstat(relpath)
+	err = w.walkFunc(relpath, info, err)
+	if err == filepath.SkipDir {
+		return nil
 	}
 	if err != nil {
 		return err
 	}
+
+	if info == nil {
+		return fmt.Errorf("Broken symlink: %s", relpath)
+	}
+
 	if !info.IsDir() {
 		return ErrNotDir
 	}
@@ -174,11 +222,11 @@ func (w *Walker) Walk(root string, walkFn filepath.WalkFunc) error {
 	for n := 1; n <= NumWorkers; n++ {
 		go w.worker()
 	}
-	w.addJob(root)  // add root path as a first job
-	w.wg.Wait()     // wait till all paths are processed
-	close(w.jobs)   // signal workers to close
-	close(w.errors) // signal errors to close
-	w.ewg.Wait()    // wait for all errors to be collected
+	w.addJob(relpath) // add this path as a first job
+	w.wg.Wait()       // wait till all paths are processed
+	close(w.jobs)     // signal workers to close
+	close(w.errors)   // signal errors to close
+	w.ewg.Wait()      // wait for all errors to be collected
 
 	if len(w.errorList.ErrorList) > 0 {
 		return w.errorList
@@ -187,8 +235,22 @@ func (w *Walker) Walk(root string, walkFn filepath.WalkFunc) error {
 }
 
 // Walk is a wrapper function for the Walker object
-// that mimicks the behavior of filepath.Walk
+// that mimics the behavior of filepath.Walk,
+// and doesn't follow symlinks.
 func Walk(root string, walkFn filepath.WalkFunc) error {
-	w := Walker{}
-	return w.Walk(root, walkFn)
+	w := Walker{
+		root: root,
+	}
+	return w.Walk("", walkFn)
+}
+
+// WalkWithSymlinks is a wrapper function for the Walker object
+// that mimics the behavior of filepath.Walk, but follows
+// directory symlinks.
+func WalkWithSymlinks(root string, walkFn filepath.WalkFunc) error {
+	w := Walker{
+		root:           root,
+		followSymlinks: true,
+	}
+	return w.Walk("", walkFn)
 }
