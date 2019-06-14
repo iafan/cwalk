@@ -64,7 +64,7 @@ func errorCallback(path string, info os.FileInfo, err error) error {
 
 func main() {
 	if len(os.Args) < 2 || os.Args[1] == "" {
-		fmt.Println("Usage: traversaltime <directory-to-scan>")
+		fmt.Println("Usage: error-handling <directory-to-scan>")
 		os.Exit(0)
 	}
 	dir := os.Args[1]
