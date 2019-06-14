@@ -10,8 +10,10 @@ import (
 	"github.com/iafan/cwalk"
 )
 
-// This example takes bin/traversaltime.go program as a basis, but, for the sake of ean xample, starts to accumulate
-// open handles processing them slowly to artificially cause errors related to exceeding the number of open file handles
+// This example takes bin/traversaltime.go program as a basis,
+// but for the sake of testing, starts to accumulate open handles,
+// processing them slowly to artificially cause errors
+// related to exceeding the number of open file handles
 
 var fileCount int32
 var folderCount int32
@@ -37,7 +39,8 @@ func callback(path string, info os.FileInfo, err error) error {
 	return nil
 }
 
-// This callback simply counts files and folders and also opens the file in order to artificially cause errors related
+// This callback simply counts files and folders and also opens
+// the file in order to artificially cause errors related
 // to exceeding the number of open file handles
 //
 // Note that the callback function should be thread-safe
