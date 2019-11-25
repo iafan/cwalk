@@ -54,3 +54,6 @@ if err != nil {
 }
 ```
 
+### Differences from filepath.Walk
+
+`filepath.Walk` sorts directory results while traversing the tree, which makes processing repeatable between runs. `cwalk.Walk()` processes files concurrentrly, sp there's no way to guarantee the order in which files or even folders are processed. If needed, you can sort the results once the entire tree is processed.
